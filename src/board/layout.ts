@@ -3,12 +3,12 @@ import type { Placement } from '../lesson/schema'
 export type Size = { width: number; height: number }
 export type Rect = { x: number; y: number; width: number; height: number }
 
-export const SIDE_X = 1180
+const SIDE_X = 1180
+const SIDE_GAP = 120
 
 const REGIONS = {
   title: { x: 40, y: 40 },
   main: { x: 40, y: 140 },
-  side: { x: SIDE_X, y: 140 },
 } as const
 
 function overlaps(a: Rect, b: Rect) {
@@ -75,8 +75,14 @@ export class Layout {
     return this.side.has(id)
   }
 
+  private sideOrigin() {
+    let x = SIDE_X
+    for (const [id, r] of this.items) if (!this.side.has(id)) x = Math.max(x, r.x + r.width + SIDE_GAP)
+    return { x, y: REGIONS.main.y }
+  }
+
   private origin(at: Placement, size: Size): { x: number; y: number } {
-    if ('region' in at) return REGIONS[at.region]
+    if ('region' in at) return at.region === 'side' ? this.sideOrigin() : REGIONS[at.region]
     const id = 'below' in at ? at.below : 'right_of' in at ? at.right_of : 'left_of' in at ? at.left_of : at.above
     const a = this.items.get(id)
     if (!a) return REGIONS.main

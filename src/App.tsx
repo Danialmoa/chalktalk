@@ -39,7 +39,10 @@ export default function App() {
   const [pdfName, setPdfName] = useState('')
   const pdfText = useRef('')
   const [busy, setBusy] = useState('')
+  const genId = useRef(0)
   const [question, setQuestion] = useState('')
+  const [answering, setAnswering] = useState(false)
+  const [askError, setAskError] = useState('')
   const [muted, setMuteUi] = useState(isMuted)
   const [voice, setVoice] = useState('')
   const [history, setHistory] = useState<HistoryItem[]>(() => loadHistory())
@@ -87,13 +90,16 @@ export default function App() {
   }
 
   const bumpSpeed = () => {
-    const i = SPEEDS.indexOf(ui.speed)
-    const next = SPEEDS[(i + 1) % SPEEDS.length] ?? 1
-    player.current?.setSpeed(next)
+    player.current?.setSpeed(SPEEDS.find((s) => s > ui.speed) ?? SPEEDS[0])
   }
 
   const remember = (item: HistoryItem) => {
     setHistory((prev) => upsert(prev, item))
+  }
+
+  const cancelLesson = () => {
+    genId.current++
+    setBusy('')
   }
 
   const replay = (item: HistoryItem) => {
@@ -105,11 +111,13 @@ export default function App() {
       void p.playAside(item.steps)
       return
     }
+    cancelLesson()
     p.load(item.title, item.steps, item.level)
     p.play()
   }
 
   const startDemo = () => {
+    cancelLesson()
     const lesson = parseLesson(fixture)
     const id = crypto.randomUUID()
     currentId.current = id
@@ -129,6 +137,7 @@ export default function App() {
   const start = async () => {
     const p = player.current
     if (!p || (!topic.trim() && !pdfText.current) || busy) return
+    const gen = ++genId.current
     const id = crypto.randomUUID()
     currentId.current = id
     collected.current = []
@@ -138,6 +147,7 @@ export default function App() {
     let got = false
     try {
       for await (const ev of generateLesson(topic.trim(), level, pdfText.current || undefined)) {
+        if (gen !== genId.current) return
         if (ev.type === 'header') {
           title = ev.title
           if (!got) p.load(ev.title, [], level)
@@ -158,6 +168,7 @@ export default function App() {
       }
       setBusy(got ? '' : 'No lesson from Backboard. Try Demo.')
     } catch (e) {
+      if (gen !== genId.current) return
       const msg = e instanceof Error ? e.message.replace(/\s+/g, ' ').slice(0, 180) : 'Backboard failed'
       setBusy(msg || 'Backboard failed')
     }
@@ -166,9 +177,10 @@ export default function App() {
   const ask = async () => {
     const p = player.current
     const b = board.current
-    if (!p || !b || !question.trim() || busy === 'Answering…') return
+    if (!p || !b || !question.trim() || answering) return
     const q = question.trim()
-    setBusy('Answering…')
+    setAnswering(true)
+    setAskError('')
     try {
       const steps = await answerQuestion({
         title: ui.title,
@@ -187,11 +199,12 @@ export default function App() {
         at: Date.now(),
       })
       setQuestion('')
-      setBusy('')
+      setAnswering(false)
       await p.playAside(steps)
     } catch (e) {
       const msg = e instanceof Error ? e.message.replace(/\s+/g, ' ').slice(0, 180) : 'Backboard failed'
-      setBusy(msg || 'Backboard failed')
+      setAnswering(false)
+      setAskError(msg || 'Backboard failed')
     }
   }
 
@@ -203,10 +216,10 @@ export default function App() {
         <button
           className="brand"
           onClick={() => {
-            player.current?.stop()
-            board.current?.reset()
-            setBusy('')
+            cancelLesson()
+            player.current?.load('', [])
             setQuestion('')
+            setAskError('')
           }}
         >
           <span className="mark">C</span>
@@ -331,7 +344,7 @@ export default function App() {
             </div>
           </div>
         )}
-        {ui.asking && (
+        {started && ui.asking && (
           <div className="ask">
             <p>Your question</p>
             <textarea
@@ -346,19 +359,19 @@ export default function App() {
               placeholder="Ask about the board…"
               rows={3}
             />
-            {busy && busy !== 'Answering…' && <p className="hint">{busy}</p>}
+            {askError && <p className="hint">{askError}</p>}
             <div className="row">
-              <button className="cta" disabled={busy === 'Answering…' || !question.trim()} onClick={ask}>
-                {busy === 'Answering…' ? 'Answering…' : 'Ask'}
+              <button className="cta" disabled={answering || !question.trim()} onClick={ask}>
+                {answering ? 'Answering…' : 'Ask'}
               </button>
               <button
                 className="ghost"
-                disabled={busy === 'Answering…'}
+                disabled={answering}
                 onClick={() => {
                   player.current?.stopAsk()
                   player.current?.play()
                   setQuestion('')
-                  setBusy('')
+                  setAskError('')
                 }}
               >
                 Continue

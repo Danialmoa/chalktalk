@@ -19,6 +19,7 @@ export class Player {
   private steps: Step[] = []
   private index = 0
   private playing = false
+  private waiting = false
   private speed = 1
   private minSlot = 0.5
   private charsPerSec = 16
@@ -44,8 +45,8 @@ export class Player {
     this.speed = pace.speed
     this.minSlot = pace.minSlot
     this.charsPerSec = pace.charsPerSec
-    this.nextClip = null
     this.asking = false
+    this.waiting = true
     this.board.reset()
     this.emit()
   }
@@ -53,7 +54,7 @@ export class Player {
   push(step: Step) {
     this.steps.push(step)
     this.emit()
-    if (!this.playing && !this.asking && !this.aside && this.index < this.steps.length) this.play()
+    if (this.waiting) this.play()
   }
 
   says() {
@@ -74,29 +75,32 @@ export class Player {
   }
 
   play() {
-    if (this.playing || this.asking || this.aside || this.index >= this.steps.length) return
+    if (this.playing || this.asking || this.aside) return
+    if (this.index >= this.steps.length) {
+      this.waiting = true
+      return
+    }
+    this.waiting = false
     this.playing = true
     this.emit()
     this.loop(this.runId)
   }
 
   pause() {
-    const raised = this.hand
+    const raised = this.hand || this.aside
+    this.halt()
     this.playing = false
     this.aside = false
     this.hand = false
-    this.runId++
-    cancel()
-    this.nextClip = null
     if (raised) this.asking = true
     this.emit()
   }
 
   skip() {
     if (this.aside || this.index >= this.steps.length) return
-    cancel()
-    this.runId++
-    this.nextClip = null
+    this.halt()
+    // Instant applies do all their drawing synchronously, so later steps can rely on these ids.
+    for (const action of this.steps[this.index].actions) void this.board.apply(action, Infinity)
     this.index++
     this.emit()
     if (this.playing) this.loop(this.runId)
@@ -115,29 +119,27 @@ export class Player {
 
   stopAsk() {
     this.asking = false
+    this.board.clearSide()
     this.emit()
   }
 
   stop() {
+    this.halt()
     this.playing = false
     this.asking = false
     this.hand = false
     this.aside = false
-    this.runId++
-    cancel()
-    this.nextClip = null
     this.index = 0
     this.emit()
   }
 
   async playAside(steps: Step[]) {
-    const id = ++this.runId
+    this.halt()
+    const id = this.runId
     this.playing = true
     this.asking = false
     this.hand = false
     this.aside = true
-    cancel()
-    this.nextClip = null
     this.emit()
     this.board.clearSide()
     for (const step of steps) {
@@ -150,7 +152,16 @@ export class Player {
     if (id !== this.runId) return
     this.aside = false
     this.playing = false
+    this.asking = true
     this.emit()
+  }
+
+  private halt() {
+    this.runId++
+    this.waiting = false
+    this.nextClip = null
+    cancel()
+    this.board.stop()
   }
 
   private snapshot(): PlayerState {
@@ -198,6 +209,7 @@ export class Player {
       this.emit()
     }
     this.playing = false
+    this.waiting = true
     this.emit()
   }
 
@@ -205,7 +217,7 @@ export class Player {
     for (const action of step.actions) {
       if (id !== this.runId) return
       const start = performance.now()
-      await this.board.apply(action, this.speed)
+      await this.board.apply(action, this.speed, this.aside)
       if (id !== this.runId) return
       const wait = slotMs - (performance.now() - start)
       if (wait > 0) await sleep(wait)

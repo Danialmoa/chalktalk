@@ -11,7 +11,7 @@ let token = 0
 let settle: (() => void) | undefined
 let source: AudioBufferSourceNode | undefined
 let muted = true
-let model: Promise<Engine> | undefined
+let model: Promise<Engine | null> | undefined
 let ctx: AudioContext | undefined
 let statusFn: ((s: string) => void) | undefined
 
@@ -32,10 +32,16 @@ function engine() {
     model = KokoroTTS.from_pretrained('onnx-community/Kokoro-82M-v1.0-ONNX', {
       dtype: 'q8',
       device: 'wasm',
-    }).then((tts) => {
-      status('')
-      return tts
-    })
+    }).then(
+      (tts) => {
+        status('')
+        return tts
+      },
+      () => {
+        status('Voice failed')
+        return null
+      },
+    )
   }
   return model
 }
@@ -96,7 +102,9 @@ export function prepare(text: string, charsPerSec = 16): Clip {
   const duration = Math.max(0.8, text.length / charsPerSec)
   const pending = muted
     ? null
-    : engine().then((tts) => tts.generate(text, { voice: 'af_heart' }) as Promise<Raw>)
+    : engine()
+        .then((tts) => (tts ? (tts.generate(text, { voice: 'af_heart' }) as Promise<Raw>) : null))
+        .catch(() => null)
   return {
     duration,
     play: (rate) =>
@@ -104,17 +112,19 @@ export function prepare(text: string, charsPerSec = 16): Clip {
         cancel()
         const t = token
         settle = resolve
+        const done = () => {
+          if (t === token) resolve()
+        }
+        const silent = () =>
+          window.setTimeout(done, (duration / Math.min(2, Math.max(0.5, rate))) * 1000)
         if (!pending) {
-          window.setTimeout(() => {
-            if (t === token) resolve()
-          }, (duration / Math.min(2, Math.max(0.5, rate))) * 1000)
+          silent()
           return
         }
         void pending.then((raw) => {
           if (t !== token) return
-          return playRaw(raw, rate, t).then(() => {
-            if (t === token) resolve()
-          })
+          if (!raw) silent()
+          else return playRaw(raw, rate, t).then(done)
         })
       }),
   }
