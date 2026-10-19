@@ -4,4 +4,4 @@ httpx==0.28.1
 python-dotenv==1.2.1
 itsdangerous==2.2.0
 SQLAlchemy==2.1.4
-psycopg2-binary==2.9.13
+psycopg[binary]==3.3.6
