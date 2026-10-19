@@ -31,4 +31,4 @@ Tests: `pytest`.
 
 ## Deploy on Render
 
-`render.yaml` describes one web service (it builds the page and runs the API) and a Postgres database. In Render, create a Blueprint from this repo and paste `BACKBOARD_API_KEY` when asked.
+`render.yaml` describes one web service on the free plan (it builds the page and runs the API) and a free Postgres database. In Render, create a Blueprint from this repo and paste `BACKBOARD_API_KEY` when asked. The free service sleeps after 15 idle minutes, so the first visit after that takes about a minute.

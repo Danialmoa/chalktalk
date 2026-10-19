@@ -2,8 +2,8 @@ services:
   - type: web
     name: chalktalk
     runtime: python
-    # Same as Spoke & Story: the free plan sleeps after 15 idle minutes and takes ~1 min to wake.
-    plan: starter
+    # Free sleeps after 15 idle minutes and takes ~1 min to wake; `starter` stays on.
+    plan: free
     # Native runtimes include Node, so one service builds the page and runs the API.
     buildCommand: npm ci && npm run build && pip install -r requirements.txt
     startCommand: uvicorn server.main:app --host 0.0.0.0 --port $PORT
