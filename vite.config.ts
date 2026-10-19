@@ -1,31 +1,28 @@
 import react from '@vitejs/plugin-react'
-import { defineConfig, loadEnv } from 'vite'
+import { defineConfig } from 'vite'
 
-export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, process.cwd(), '')
-  const backboardKey = env.BACKBOARD_API_KEY
+// Cross-origin isolation lets the voice model run on several threads: about twice as fast, so the voice
+// keeps up with the lesson. server/main.py sends the same headers in production.
+const isolation = {
+  'Cross-Origin-Opener-Policy': 'same-origin',
+  'Cross-Origin-Embedder-Policy': 'credentialless',
+}
 
-  return {
-    plugins: [react()],
-    optimizeDeps: {
-      exclude: ['kokoro-js'],
+export default defineConfig({
+  plugins: [react()],
+  optimizeDeps: {
+    exclude: ['kokoro-js'],
+  },
+  // The voice worker pulls in onnxruntime, which loads parts of itself on demand; iife workers can't split.
+  worker: { format: 'es' },
+  define: {
+    'process.env.IS_PREACT': JSON.stringify('false'),
+  },
+  server: {
+    headers: isolation,
+    proxy: {
+      '/api': 'http://localhost:8000',
     },
-    define: {
-      'process.env.IS_PREACT': JSON.stringify('false'),
-    },
-    server: {
-      proxy: {
-        '/backboard': {
-          target: 'https://app.backboard.io/api',
-          changeOrigin: true,
-          rewrite: (path) => path.replace(/^\/backboard/, ''),
-          configure: (proxy) => {
-            proxy.on('proxyReq', (proxyReq) => {
-              if (backboardKey) proxyReq.setHeader('X-API-Key', backboardKey)
-            })
-          },
-        },
-      },
-    },
-  }
+  },
+  preview: { headers: isolation },
 })

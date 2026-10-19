@@ -35,6 +35,46 @@ export const Action = z.discriminatedUnion('type', [
     label: z.string().optional(),
     dashed: z.boolean().optional(),
   }),
+  z.object({
+    type: z.literal('words'),
+    id: Id,
+    words: z.array(z.string()).min(1),
+    at: Placement,
+  }),
+  z.object({
+    type: z.literal('link'),
+    from: Id,
+    to: Id,
+    label: z.string().optional(),
+    weight: z.number().optional(),
+  }),
+  z.object({
+    type: z.literal('table'),
+    id: Id,
+    rows: z.array(z.array(z.coerce.string())).min(1),
+    at: Placement,
+  }),
+  z.object({
+    type: z.literal('bars'),
+    id: Id,
+    bars: z.array(z.object({ label: z.string(), value: z.coerce.number() })).min(1),
+    unit: z.string().optional(),
+    at: Placement,
+  }),
+  z.object({
+    type: z.literal('list'),
+    id: Id,
+    title: z.string().optional(),
+    items: z.array(z.string()),
+    at: Placement,
+  }),
+  z.object({
+    type: z.literal('mark'),
+    target: Id,
+    style: z.enum(['underline', 'circle']).optional(),
+    note: z.string().optional(),
+  }),
+  z.object({ type: z.literal('strike'), target: Id }),
   z.object({ type: z.literal('highlight'), target: Id }),
   z.object({ type: z.literal('circle'), target: Id }),
   z.object({ type: z.literal('underline'), target: Id }),
@@ -44,7 +84,17 @@ export const Action = z.discriminatedUnion('type', [
 
 export const Step = z.object({
   say: z.string(),
-  actions: z.array(Action).default([]),
+  gist: z.string().optional(),
+  // One bad action shouldn't cost the whole step and its spoken line.
+  actions: z
+    .array(z.unknown())
+    .default([])
+    .transform((list) =>
+      list.flatMap((raw) => {
+        const action = Action.safeParse(raw)
+        return action.success ? [action.data] : []
+      }),
+    ),
 })
 
 export const LessonHeader = z.object({

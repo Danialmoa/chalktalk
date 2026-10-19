@@ -1,26 +1,13 @@
+import { errorText } from '../api'
 import { jsonLine } from './parse'
 
-const MODEL = 'google/gemma-4-26b-a4b-it'
-
-function post(system: string, user: string, stream: boolean) {
-  return fetch(`${location.origin}/backboard/threads/messages`, {
+export async function* streamLines(system: string, user: string) {
+  const res = await fetch('/api/llm', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      content: user,
-      system_prompt: system,
-      llm_provider: 'openrouter',
-      model_name: MODEL,
-      json_output: false,
-      memory: 'off',
-      stream,
-    }),
+    body: JSON.stringify({ system, content: user }),
   })
-}
-
-export async function* streamLines(system: string, user: string) {
-  const res = await post(system, user, true)
-  if (!res.ok || !res.body) throw new Error(await res.text())
+  if (!res.ok || !res.body) throw new Error(await errorText(res))
   const reader = res.body.getReader()
   const dec = new TextDecoder()
   let buf = ''

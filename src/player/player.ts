@@ -1,7 +1,7 @@
 import type { Step } from '../lesson/schema'
 import type { Board } from '../board/draw'
 import { PACE, type Level } from '../lesson/level'
-import { cancel, prepare, type Clip } from '../voice/tts'
+import { cancel, dropQueued, prepare, type Clip } from '../voice/tts'
 
 export type PlayerState = {
   playing: boolean
@@ -11,9 +11,18 @@ export type PlayerState = {
   title: string
   asking: boolean
   hand: boolean
+  notes: string[]
 }
 
 type Listener = (s: PlayerState) => void
+
+// How many steps past the current one get their voice made in advance. Kokoro makes speech a bit
+// slower than it plays, so working ahead (from the moment steps arrive) builds a lead instead of
+// leaving it idle during short lines and late for long ones.
+const AHEAD = 3
+
+// Lessons saved before steps had a gist fall back to their first spoken sentence.
+const gistOf = (step: Step) => step.gist || step.say.split(/(?<=[.!?])\s/)[0]
 
 export class Player {
   private steps: Step[] = []
@@ -27,17 +36,20 @@ export class Player {
   private asking = false
   private hand = false
   private aside = false
+  // False while steps are still being written, so the end-of-lesson overview waits for the real end.
+  private complete = true
   private listeners = new Set<Listener>()
   private runId = 0
-  private nextClip: Clip | null = null
+  private clips = new Map<number, Clip>()
   private board: Board
 
   constructor(board: Board) {
     this.board = board
   }
 
-  load(title: string, steps: Step[], level: Level = 'intermediate') {
+  load(title: string, steps: Step[], level: Level = 'intermediate', complete = true) {
     this.stop()
+    this.complete = complete
     const pace = PACE[level]
     this.title = title
     this.steps = steps
@@ -46,15 +58,21 @@ export class Player {
     this.minSlot = pace.minSlot
     this.charsPerSec = pace.charsPerSec
     this.asking = false
-    this.waiting = true
     this.board.reset()
     this.emit()
   }
 
   push(step: Step) {
     this.steps.push(step)
+    // An answer's voice comes first while it plays; the lesson's voice catches up after.
+    if (!this.aside) this.prefetch()
     this.emit()
     if (this.waiting) this.play()
+  }
+
+  finish() {
+    this.complete = true
+    if (!this.playing && !this.asking && this.index > 0 && this.index >= this.steps.length) this.board.overview()
   }
 
   says() {
@@ -84,6 +102,16 @@ export class Player {
     this.playing = true
     this.emit()
     this.loop(this.runId)
+  }
+
+  // Plays once the first step's voice is made, capped so a slow or first-time voice never holds the start.
+  async warmStart(capMs = 8000) {
+    const id = this.runId
+    if (this.steps[this.index]) {
+      this.prefetch()
+      await Promise.race([this.clipFor(this.index).loaded, sleep(capMs)])
+    }
+    if (id === this.runId) this.play()
   }
 
   pause() {
@@ -145,8 +173,8 @@ export class Player {
     for (const step of steps) {
       if (id !== this.runId) return
       const clip = prepare(step.say, this.charsPerSec)
-      const n = Math.max(step.actions.length, 1)
-      const slot = Math.max(this.minSlot, clip.duration / n) * 1000 / this.speed
+      const slot = await this.slotFor(clip, step)
+      if (id !== this.runId) return
       await Promise.all([clip.play(this.speed), this.drawStep(id, step, slot)])
     }
     if (id !== this.runId) return
@@ -159,8 +187,9 @@ export class Player {
   private halt() {
     this.runId++
     this.waiting = false
-    this.nextClip = null
+    this.clips.clear()
     cancel()
+    dropQueued()
     this.board.stop()
   }
 
@@ -173,6 +202,9 @@ export class Player {
       title: this.title,
       asking: this.asking,
       hand: this.hand,
+      notes: this.steps
+        .slice(0, this.index + (this.playing && !this.aside ? 1 : 0))
+        .map(gistOf),
     }
   }
 
@@ -184,13 +216,11 @@ export class Player {
   private async loop(id: number) {
     while (this.playing && id === this.runId && this.index < this.steps.length) {
       const step = this.steps[this.index]
-      const clip = this.nextClip ?? prepare(step.say, this.charsPerSec)
-      this.nextClip = null
-      const next = this.steps[this.index + 1]
-      if (next) this.nextClip = prepare(next.say, this.charsPerSec)
+      const clip = this.clipFor(this.index)
+      this.prefetch()
 
-      const n = Math.max(step.actions.length, 1)
-      const slot = Math.max(this.minSlot, clip.duration / n) * 1000 / this.speed
+      const slot = await this.slotFor(clip, step)
+      if (id !== this.runId) return
 
       const audio = clip.play(this.speed)
       const draw = this.drawStep(id, step, slot)
@@ -210,17 +240,41 @@ export class Player {
     }
     this.playing = false
     this.waiting = true
+    if (this.complete && id === this.runId && this.index >= this.steps.length) this.board.overview()
     this.emit()
   }
 
+  private clipFor(i: number) {
+    let clip = this.clips.get(i)
+    if (!clip) {
+      clip = prepare(this.steps[i].say, this.charsPerSec)
+      this.clips.set(i, clip)
+    }
+    return clip
+  }
+
+  private prefetch() {
+    for (const i of this.clips.keys()) if (i < this.index) this.clips.delete(i)
+    for (let i = this.index; i < Math.min(this.steps.length, this.index + AHEAD + 1); i++) this.clipFor(i)
+  }
+
+  // Spreads a step's actions over its voice. Waits a moment for the voice to be made so the drawing
+  // follows its real length: the text-based guess runs about 2 s long, which left a silence after every line.
+  private async slotFor(clip: Clip, step: Step) {
+    const real = await Promise.race([clip.loaded, sleep(3000)])
+    const seconds = typeof real === 'number' ? real : clip.duration
+    return (Math.max(this.minSlot, seconds / Math.max(step.actions.length, 1)) * 1000) / this.speed
+  }
+
   private async drawStep(id: number, step: Step, slotMs: number) {
-    for (const action of step.actions) {
+    for (const [i, action] of step.actions.entries()) {
       if (id !== this.runId) return
       const start = performance.now()
       await this.board.apply(action, this.speed, this.aside)
       if (id !== this.runId) return
+      // No wait after the last action: the voice already holds the step until it ends.
       const wait = slotMs - (performance.now() - start)
-      if (wait > 0) await sleep(wait)
+      if (wait > 0 && i < step.actions.length - 1) await sleep(wait)
     }
     if (id !== this.runId) return
     this.board.frame(step.actions)

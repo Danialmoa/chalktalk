@@ -4,15 +4,16 @@ import { continueUser, lessonPrompt, lessonUser, openingRule } from './prompts'
 import { parseHeader, parseStep } from './parse'
 import type { Step } from './schema'
 
-export type GenEvent =
-  | { type: 'header'; title: string }
-  | { type: 'step'; step: Step }
+type LineEvent = { type: 'header'; title: string } | { type: 'step'; step: Step }
+
+// `ready`: the opening steps are in, so playback can start while the rest is written.
+export type GenEvent = LineEvent | { type: 'ready' }
 
 async function* readLesson(
   system: string,
   user: string,
   headerExpected: boolean,
-): AsyncGenerator<GenEvent> {
+): AsyncGenerator<LineEvent> {
   let headerDone = !headerExpected
   for await (const line of streamLines(system, user)) {
     if (!headerDone) {
@@ -28,7 +29,7 @@ async function* readLesson(
   }
 }
 
-export async function* generateLesson(topic: string, level: Level, paper?: string) {
+export async function* generateLesson(topic: string, level: Level, paper?: string): AsyncGenerator<GenEvent> {
   const system = lessonPrompt(level)
   const opening: string[] = []
   for await (const ev of readLesson(`${system}\n${openingRule()}`, lessonUser(topic, paper), true)) {
@@ -37,6 +38,7 @@ export async function* generateLesson(topic: string, level: Level, paper?: strin
     yield ev
   }
   if (!opening.length) return
+  yield { type: 'ready' }
   for await (const ev of readLesson(system, continueUser(opening.join('\n')), false)) {
     yield ev
   }

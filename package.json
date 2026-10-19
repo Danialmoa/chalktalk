@@ -7,11 +7,14 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "server": "uvicorn server.main:app --reload --port 8000"
   },
   "dependencies": {
     "@excalidraw/excalidraw": "^0.18.1",
+    "@huggingface/transformers": "^3.8.1",
     "kokoro-js": "^1.2.1",
+    "lucide-react": "^1.57.0",
     "ollama": "^0.6.4",
     "pdfjs-dist": "^6.4.299",
     "react": "^19.2.8",

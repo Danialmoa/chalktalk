@@ -29,10 +29,10 @@ function port(r: Rect, drop: number, edge: Side): Pt {
 }
 
 function link(a: Pt, b: Pt, blocks: Rect[]): Pt[] {
-  if (Math.abs(a.x - b.x) <= 12 && !hits([a, { x: a.x, y: b.y }], blocks)) {
+  if (Math.abs(a.x - b.x) <= 24 && !hits([a, { x: a.x, y: b.y }], blocks)) {
     return [a, { x: a.x, y: b.y }]
   }
-  if (Math.abs(a.y - b.y) <= 12 && !hits([a, { x: b.x, y: a.y }], blocks)) {
+  if (Math.abs(a.y - b.y) <= 24 && !hits([a, { x: b.x, y: a.y }], blocks)) {
     return [a, { x: b.x, y: a.y }]
   }
   const vertical = Math.abs(b.y - a.y) >= Math.abs(b.x - a.x)
@@ -123,15 +123,12 @@ function rails(blocks: Rect[], axis: 'x' | 'y', a: Pt, b: Pt) {
   return [hi, lo].sort((p, q) => Math.abs(p - mid) - Math.abs(q - mid))
 }
 
+// Points are relative to the first one: Excalidraw's converter moves a first point that isn't at 0,0,
+// which flattened every arrow that pointed up.
 function norm(path: Pt[]) {
   const pts = dedupe(path)
-  const minX = Math.min(...pts.map((p) => p.x))
-  const minY = Math.min(...pts.map((p) => p.y))
-  const points = pts.map((p) => [p.x - minX, p.y - minY] as [number, number])
-  const last = points[points.length - 1]
-  if (last[0] === 0 && points.every((p) => p[0] === 0)) last[0] = 1
-  if (last[1] === 0 && points.every((p) => p[1] === 0)) last[1] = 1
-  return { x: minX, y: minY, points }
+  const [first] = pts
+  return { x: first.x, y: first.y, points: pts.map((p) => [p.x - first.x, p.y - first.y] as [number, number]) }
 }
 
 function dedupe(path: Pt[]) {
